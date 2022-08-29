@@ -2,7 +2,7 @@
 
 This repository contains Jupyter notebooks (in Markdown `.md` format),
 which demonstrate the use of the open-source libraries like 
-`qmckl`, `numgrid` and `xcfun` via their Python APIs. 
+`qmckl`, `numgrid`, `trexio` and `xcfun` via their Python APIs. 
 It takes advantage of the high-performance optimization of the underlying libraries 
 (C, C++, Rust) and their native compatibility with Python. 
 
@@ -12,7 +12,7 @@ It takes advantage of the high-performance optimization of the underlying librar
 - `qmckl_numgrid.md`
   1. Load some quantum chemistry data including molecular geometry and basis set information stored in the [trexio](https://github.com/TREX-CoE/trexio) file format via the `qmckl` context
   2. Set up a grid for molecular integrals via the `numgrid` library using the pre-processed data from the `qmckl` context
-  3. Compute atomic orbital (AO) values on a grid via high-optimised `qmckl` routines
+  3. Compute atomic orbital (AO) values on a grid via the high-performance `qmckl` routines
   4. Calculate the AO overlap matrix (via the `qmckl_dgemm` or NumPy matrix multiplication routines)
   5. Compute density matrix using the molecular orbital (MO) coefficients from the context
   6. Calculate numerically the number of electrons and compare it with the exact value from the context
@@ -24,14 +24,18 @@ It takes advantage of the high-performance optimization of the underlying librar
 
 ## Requirements
 
-- `python` 
+- `python3` 	(>= 3.6) 
 - `jupyter`
-- `jupytext` (to convert notebooks from Markdown `.md` format into interactive `.ipynb` notebook)
+- `jupytext` 	(to convert notebooks from the Markdown `.md` format into`.ipynb` notebook)
 
-- `numpy`
+- `numpy`	(>= 1.19.3)
+- `trexio`	(Python API installation: `pip install trexio`)
+- `numgrid` 	(Python API installation: `pip install numgrid`) 
 - `qmckl` 	([Python API installation instructions](https://github.com/TREX-CoE/qmckl/blob/master/README.md))
-- `numgrid` 	([Python API installation instructions](https://github.com/dftlibs/numgrid/blob/main/README.rst))
 - `xcfun`	([Python API installation instructions](https://xcfun.readthedocs.io/en/latest/building.html#))
+
+**Note:** we recommend to use virtual environments to avoid compatibility issues and to improve reproducibility.
+For more details, see the corresponding part of the [Python documentation](https://docs.python.org/3/library/venv.html#creating-virtual-environments).
 
 
 ## Running the notebook
