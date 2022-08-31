@@ -13,6 +13,7 @@ import qmckl
 import numgrid
 import xcfun
 import trexio
+from timeit import default_timer as timer
 ```
 
 Creating the QMCkl context before proceeding to use the library
@@ -128,10 +129,10 @@ Specify some parameters that define the numerical integration grid (following `R
 
 ```python
 radial_precision = 1.0e-12
-min_num_angular_points = 86
-max_num_angular_points = 302
-#min_num_angular_points = 770
-#max_num_angular_points = 3470
+#min_num_angular_points = 86
+#max_num_angular_points = 302
+min_num_angular_points = 770
+max_num_angular_points = 3470
 proton_charges = np.array(nucleus_charge, dtype=np.int32)
 center_coordinates_bohr = [
     tuple(coord) for coord in nucleus_coord.reshape(nucleus_num,3)
@@ -167,7 +168,7 @@ for center_index in range(len(center_coordinates_bohr)):
 print("Number of points:", num_points)
 ```
 
-    Number of points: 41234
+    Number of points: 450926
 
 
 Prepare the context before computing the atomic orbital (AO) values on a grid
@@ -184,7 +185,11 @@ Calculate the AO values `ao_v_w` on a grid (`w` is for weighted)
 
 
 ```python
+start = timer()
 ao_v = qmckl.get_ao_basis_ao_value(ctx, num_points*ao_num)
+end = timer()
+print(f"Timing for qmckl_ao_value: {(end - start):.6f}") # Time in seconds
+
 ao_v.shape = (num_points, ao_num)
 # elementwise multiplication of numpy arrays
 tmp = ao_v.T * weight_all_flat
@@ -194,10 +199,14 @@ ao_v.shape   = num_points*ao_num
 ao_v_w.shape = num_points*ao_num
 ```
 
+    Timing for qmckl_ao_value: 0.040345
+
+
 Compute the overlap using the `qmckl_dgemm_safe` function
 
 
 ```python
+start = timer()
 overlap = qmckl.dgemm_safe(
     ctx, 'N', 'T', 
     ao_num, ao_num, num_points, 1.0, 
@@ -206,7 +215,12 @@ overlap = qmckl.dgemm_safe(
     ao_num*ao_num, # ---> dimension of the returned array (a.k.a size_max)
     ao_num
 )
+end = timer()
+print(f"Timing for qmckl_dgemm: {(end - start):.6f}") # Time in seconds
 ```
+
+    Timing for qmckl_dgemm: 0.019855
+
 
 Compute the adjugate matrix using the `qmckl_adjugate_safe` function
 
@@ -233,18 +247,30 @@ Now compute the overlap matrix using the `numpy` routines instead of `qmckl_dgem
 
 
 ```python
-# TODO: measure performance of numpy @ matrix product VS qmckl_dgemm_safe
+start = timer()
 overlap_np = ao_v_w.T @ ao_v
+end = timer()
+print(f"Timing for numpy dgemm: {(end - start):.6f}") # Time in seconds
 assert np.allclose(overlap_np, overlap)
 ```
+
+    Timing for numpy dgemm: 0.023641
+
 
 And also compare with the overlap matrix that was stored in the TREXIO file. **Note:** we have to lower the tolerance here due to the differences between the reference method (code) that produced the TREXIO file and the grid used in this demo.
 
 
 ```python
-# atol=1e-8 works with larger grid [770, 3470] ; atol=1e-7 is for the smaller ones
-assert np.allclose(overlap_ao_ref, overlap, atol=1e-7)
+# atol=1e-8 works with larger grids like [770, 3470] ; atol=1e-7 is for the smaller ones
+print(np.linalg.norm(overlap_ao_ref-overlap))
+print(np.linalg.norm(overlap_ao_ref-overlap_np))
+assert np.allclose(overlap_ao_ref, overlap, atol=1e-8)
+assert np.allclose(overlap_ao_ref, overlap_np, atol=1e-8)
 ```
+
+    1.2363966849449855e-06
+    1.2363966849309476e-06
+
 
 Dummy check that the computed determinant and adjugate matrix are actually consistent
 
@@ -254,7 +280,7 @@ det_ref = np.diagonal(overlap_adj @ overlap)[0]
 print(f"Error: {(det_ref-detA):0.4e}")
 ```
 
-    Error: 0.0000e+00
+    Error: 5.5511e-17
 
 
 
@@ -279,21 +305,20 @@ coefficients = qmckl.get_mo_basis_coefficient(ctx, mo_num*ao_num)
 coefficients.shape = (mo_num,ao_num)
 ```
 
-Get the number of electrons and check that we are working with a closed-shell molecule
+Get the number of spin-up and spin-down electrons. Writing for an open-shell case from the beginning to avoiding messing up later.
 
 
 ```python
-if qmckl.get_electron_up_num(ctx) ==  qmckl.get_electron_down_num(ctx):
-    el_num = int(qmckl.get_electron_num(ctx)/2)
-else:
-    raise Exception("Open-shell case is not supported yet.")
+el_num_up = qmckl.get_electron_up_num(ctx)
+el_num_dn = qmckl.get_electron_down_num(ctx)
 ```
 
-Compute the ground state density matrix in the AO basis
+Compute the ground state density matrix in the AO basis. Normally one should use different set of the MO coefficients for spin-up and spin-down electrons, but this is not the case yet in `qmckl` or `trexio`, so we use the closed-shell set MO coefficients from the context. **TODO:** change later when running the SCF cycle.
 
 
 ```python
-p_mat = coefficients[0:el_num,:].T @ coefficients[0:el_num,:]
+p_mat_up = coefficients[0:el_num_up,:].T @ coefficients[0:el_num_up,:]
+p_mat_dn = coefficients[0:el_num_dn,:].T @ coefficients[0:el_num_dn,:]
 ```
 
 Compute the number of electrons numerically as a product of the density and overlap matrices
@@ -301,12 +326,14 @@ Compute the number of electrons numerically as a product of the density and over
 
 ```python
 # tensordot on matrices is equivalent to a double dot product (sum_i sum_j A_ij*B_ij)
-el_num_calc = np.tensordot(p_mat, overlap)
+el_num_up_calc = np.tensordot(p_mat_up, overlap)
+el_num_dn_calc = np.tensordot(p_mat_dn, overlap)
 ```
 
 
 ```python
-#print(el_num, el_num_calc)
+el_num      = el_num_up + el_num_dn
+el_num_calc = el_num_up_calc + el_num_dn_calc
 assert np.around(el_num) == np.around(el_num_calc)
 ```
 
@@ -335,7 +362,8 @@ First compute the matrix product, i.e. `D_mk = sum_n (P_mn * AO_nk)`
 
 
 ```python
-n_tmp = p_mat @ ao_v.T
+n_up_tmp = p_mat_up @ ao_v.T
+n_dn_tmp = p_mat_dn @ ao_v.T
 ```
 
 Then compute the row-wise dot product, i.e. `sum_m (D_mk * AO_mk)`
@@ -343,22 +371,25 @@ Then compute the row-wise dot product, i.e. `sum_m (D_mk * AO_mk)`
 
 ```python
 # Solution 1: numpy.sum over given axis (the bad)
-n_1 = np.sum(n_tmp * ao_v.T, axis=0)
+n_up0 = np.sum(n_up_tmp * ao_v.T, axis=0)
+n_dn0 = np.sum(n_dn_tmp * ao_v.T, axis=0)
 ```
 
 
 ```python
 # Solution 2: numpy.einsum with tensor contraction (the good)
-n_2 = np.einsum('ij, ij->j', n_tmp, ao_v.T)
+n_up  = np.einsum('ij, ij->j', n_up_tmp, ao_v.T)
+n_dn  = np.einsum('ij, ij->j', n_dn_tmp, ao_v.T)
+density = np.array([n_up, n_dn])
 ```
 
 Some dummy checks
 
 
 ```python
-assert n_1.size == num_points
-assert n_2.size == num_points
-assert np.allclose(n_1, n_2, rtol=1e-15, atol=1e-12)
+assert n_up.size == num_points and n_dn.size == num_points
+assert np.allclose(n_up, n_up0, rtol=1e-15, atol=1e-12)
+assert np.allclose(n_dn, n_dn0, rtol=1e-15, atol=1e-12)
 #assert np.allclose(n_1, n_r, rtol=1e-15, atol=1e-12)
 #assert np.allclose(n_2, n_r, rtol=1e-15, atol=1e-12)
 ```
@@ -369,34 +400,37 @@ Firstly, we set up some parameters of XCFun library (see the documentation)
 
 
 ```python
-fun_xc_name = 'LDA'
+fun_xc_name   = 'LDA'
 fun_xc_weight = 1.0
-fun_xc = xcfun.Functional({fun_xc_name: fun_xc_weight})
+fun_xc        = xcfun.Functional({fun_xc_name: fun_xc_weight})
 ```
 
-Now we are ready to evaluate the XC funtional contribution using the previously computed density on a grid (e.g. `n_2`)
+Now we are ready to evaluate the XC funtional contribution using the previously computed density on a grid
 
 
 ```python
-result = fun_xc.eval_potential_n(n_2)
-# the output contains energy density and XC potential values on a grid
-energy    = result[:, 0]
-potential = result[:, 1]
+result = fun_xc.eval_potential_ab(density.T)
+# the output contains energy density and XC potential (spin-resolved) on a grid
+energy_density = result[:, 0]
+potential_up   = result[:, 1]
+potential_dn   = result[:, 2]
+```
+
+
+```python
+energy_density_test = fun_xc.eval_energy_n(n_up + n_dn)
+assert np.allclose(energy_density_test, energy_density)
 ```
 
 Finally, to compute the XC energy contribution we need to integrate the energy density on our grid with weights
 
 
 ```python
-e_xc = energy @ weight_all_flat
-```
-
-
-```python
+e_xc   = energy_density @ weight_all_flat
 print(f"XC energy contribution with the {fun_xc_name} functional = {e_xc}")
 ```
 
-    XC energy contribution with the LDA functional = -3.563430888505756
+    XC energy contribution with the LDA functional = -8.873142309483445
 
 
 ## Final
