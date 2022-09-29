@@ -18,7 +18,7 @@ It takes advantage of the high-performance optimization of the underlying librar
   6. Calculate numerically the number of electrons and compare it with the exact value from the context
   7. Compute density values on a grid (required for the DFT)
   8. Set up the exchange-correlation functional via the `xcfun` library
-  9. Compute energy and XC potential values on a grid (via the `xcfun)
+  9. Compute energy and XC potential values on a grid (via the `xcfun`)
   10. Calculate numerically the XC energy contribution
 
 
